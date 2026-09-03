@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0d12" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Study Timer" />
+  <link rel="manifest" href="manifest.json" />
+  <title>Study Timer</title>
+  <style>
+    :root{
+      --bg:#0b0d12;
+      --card:#141821;
+      --card2:#10141c;
+      --text:#f5f7fb;
+      --muted:#8f98a8;
+      --line:#242a35;
+      --active:#ffffff;
+      --danger:#ff5f57;
+      --radius:22px;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif}
+    body{padding:calc(env(safe-area-inset-top) + 18px) 16px calc(env(safe-area-inset-bottom) + 24px)}
+    .wrap{max-width:620px;margin:0 auto}
+    h1{font-size:32px;line-height:1.05;margin:4px 0 6px;letter-spacing:-.8px}
+    .sub{color:var(--muted);font-size:14px;margin-bottom:20px}
+    .timer{
+      background:linear-gradient(180deg,var(--card),var(--card2));
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      padding:18px;
+      margin:14px 0;
+      box-shadow:0 10px 30px rgba(0,0,0,.18);
+    }
+    .timer.active{border-color:#5b6474}
+    .top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .name{font-weight:700;font-size:20px}
+    .badge{font-size:12px;color:var(--muted)}
+    .time{font-variant-numeric:tabular-nums;font-size:42px;font-weight:750;letter-spacing:-1.5px;margin:14px 0 16px}
+    button{
+      width:100%;
+      border:0;
+      border-radius:16px;
+      padding:14px 16px;
+      font-size:17px;
+      font-weight:700;
+      background:#f4f6fa;
+      color:#0b0d12;
+      -webkit-tap-highlight-color:transparent;
+    }
+    button:active{transform:scale(.99)}
+    .pause{background:#2b313d;color:#fff}
+    .stats{
+      margin-top:20px;
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      padding:18px;
+    }
+    .stats h2{font-size:18px;margin:0 0 14px}
+    .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+    .stat{background:#0f131a;border:1px solid var(--line);border-radius:16px;padding:12px}
+    .label{font-size:12px;color:var(--muted);margin-bottom:6px}
+    .value{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
+    .subject-row{display:grid;grid-template-columns:1fr auto;gap:12px;padding:10px 0;border-top:1px solid var(--line);font-size:14px}
+    .subject-row:first-of-type{margin-top:14px}
+    .muted{color:var(--muted)}
+    .reset{
+      margin-top:16px;background:transparent;color:var(--danger);
+      border:1px solid #3b2528;font-size:14px;padding:12px;
+    }
+    .footer{color:var(--muted);font-size:12px;text-align:center;margin-top:16px}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Study Timer</h1>
+  <div class="sub">Physics · Chemistry · Biology</div>
+
+  <div id="timers"></div>
+
+  <section class="stats">
+    <h2>Статистика</h2>
+    <div class="grid">
+      <div class="stat"><div class="label">Сегодня</div><div id="todayTotal" class="value">0:00</div></div>
+      <div class="stat"><div class="label">7 дней</div><div id="weekTotal" class="value">0:00</div></div>
+      <div class="stat"><div class="label">Всё время</div><div id="allTotal" class="value">0:00</div></div>
+    </div>
+    <div id="subjectStats"></div>
+    <button class="reset" id="resetBtn">Сбросить всю статистику</button>
+  </section>
+
+  <div class="footer">Время сохраняется на этом устройстве.</div>
+</div>
+
+<script>
+const SUBJECTS = [
+  { id:'physics', name:'Physics' },
+  { id:'chemistry', name:'Chemistry' },
+  { id:'biology', name:'Biology' }
+];
+
+const STORAGE_KEY = 'studyTimerDataV1';
+
+function localDateKey(ts = Date.now()) {
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+
+function defaultData(){
+  return {
+    totals: { physics:0, chemistry:0, biology:0 },
+    daily: {},
+    active: null
+  };
+}
+
+function load(){
+  try{
+    const x = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    return x && x.totals && x.daily ? x : defaultData();
+  }catch(e){ return defaultData(); }
+}
+
+let data = load();
+
+function save(){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+function ensureDay(dayKey){
+  if(!data.daily[dayKey]){
+    data.daily[dayKey] = { physics:0, chemistry:0, biology:0 };
+  }
+}
+
+function addElapsed(subject, fromTs, toTs){
+  if(!subject || toTs <= fromTs) return;
+
+  // Split across local calendar days correctly.
+  let cursor = fromTs;
+  while(cursor < toTs){
+    const d = new Date(cursor);
+    const nextMidnight = new Date(d.getFullYear(), d.getMonth(), d.getDate()+1).getTime();
+    const end = Math.min(toTs, nextMidnight);
+    const seconds = Math.max(0, (end - cursor) / 1000);
+    const key = localDateKey(cursor);
+
+    ensureDay(key);
+    data.daily[key][subject] = (data.daily[key][subject] || 0) + seconds;
+    data.totals[subject] = (data.totals[subject] || 0) + seconds;
+    cursor = end;
+  }
+}
+
+function checkpoint(){
+  if(data.active){
+    const now = Date.now();
+    addElapsed(data.active.subject, data.active.startedAt, now);
+    data.active.startedAt = now;
+    save();
+  }
+}
+
+function toggle(subject){
+  const now = Date.now();
+
+  if(data.active){
+    addElapsed(data.active.subject, data.active.startedAt, now);
+  }
+
+  if(data.active && data.active.subject === subject){
+    data.active = null;
+  } else {
+    data.active = { subject, startedAt: now };
+  }
+
+  save();
+  render();
+}
+
+function effectiveSeconds(subject, period){
+  let base = 0;
+
+  if(period === 'all'){
+    base = data.totals[subject] || 0;
+  } else {
+    const keys = period === 'today' ? [localDateKey()] : lastNDaysKeys(7);
+    for(const k of keys){
+      base += (data.daily[k] && data.daily[k][subject]) || 0;
+    }
+  }
+
+  if(data.active && data.active.subject === subject){
+    const now = Date.now();
+    if(period === 'all'){
+      base += (now - data.active.startedAt)/1000;
+    } else {
+      // Add only active time that belongs to included dates.
+      let cursor = data.active.startedAt;
+      while(cursor < now){
+        const d = new Date(cursor);
+        const nextMidnight = new Date(d.getFullYear(), d.getMonth(), d.getDate()+1).getTime();
+        const end = Math.min(now, nextMidnight);
+        const key = localDateKey(cursor);
+        const allowed = period === 'today' ? key === localDateKey() : lastNDaysKeys(7).includes(key);
+        if(allowed) base += (end-cursor)/1000;
+        cursor = end;
+      }
+    }
+  }
+  return base;
+}
+
+function lastNDaysKeys(n){
+  const keys=[];
+  const d = new Date();
+  d.setHours(12,0,0,0);
+  for(let i=0;i<n;i++){
+    const x = new Date(d);
+    x.setDate(d.getDate()-i);
+    keys.push(localDateKey(x.getTime()));
+  }
+  return keys;
+}
+
+function fmt(sec, showSeconds=false){
+  sec = Math.max(0, Math.floor(sec));
+  const h = Math.floor(sec/3600);
+  const m = Math.floor((sec%3600)/60);
+  const s = sec%60;
+  if(showSeconds) return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  if(h > 0) return `${h}h ${String(m).padStart(2,'0')}m`;
+  return `${m}m`;
+}
+
+function render(){
+  const root = document.getElementById('timers');
+  root.innerHTML = SUBJECTS.map(s=>{
+    const active = data.active && data.active.subject === s.id;
+    const today = effectiveSeconds(s.id,'today');
+    return `
+      <section class="timer ${active ? 'active':''}">
+        <div class="top">
+          <div class="name">${s.name}</div>
+          <div class="badge">${active ? 'Идёт сейчас' : 'Сегодня'}</div>
+        </div>
+        <div class="time" id="time-${s.id}">${fmt(today,true)}</div>
+        <button class="${active ? 'pause':''}" onclick="toggle('${s.id}')">
+          ${active ? 'Pause' : 'Start'}
+        </button>
+      </section>`;
+  }).join('');
+
+  const todayTotal = SUBJECTS.reduce((a,s)=>a+effectiveSeconds(s.id,'today'),0);
+  const weekTotal  = SUBJECTS.reduce((a,s)=>a+effectiveSeconds(s.id,'week'),0);
+  const allTotal   = SUBJECTS.reduce((a,s)=>a+effectiveSeconds(s.id,'all'),0);
+
+  document.getElementById('todayTotal').textContent = fmt(todayTotal);
+  document.getElementById('weekTotal').textContent = fmt(weekTotal);
+  document.getElementById('allTotal').textContent = fmt(allTotal);
+
+  document.getElementById('subjectStats').innerHTML = SUBJECTS.map(s=>`
+    <div class="subject-row">
+      <span>${s.name}</span>
+      <span class="muted">${fmt(effectiveSeconds(s.id,'week'))} / 7 дней</span>
+    </div>`).join('');
+}
+
+document.getElementById('resetBtn').addEventListener('click',()=>{
+  if(confirm('Удалить всю историю и все таймеры?')){
+    data = defaultData();
+    save();
+    render();
+  }
+});
+
+// Keep stored totals reasonably current while app is open.
+setInterval(()=>{
+  render();
+  if(data.active) checkpoint();
+},1000);
+
+window.addEventListener('pagehide', checkpoint);
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'hidden') checkpoint();
+});
+
+render();
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+}
+</script>
+</body>
+</html>
