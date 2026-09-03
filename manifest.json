@@ -1,8 +1,1 @@
-{
-  "name": "Study Timer",
-  "short_name": "Study Timer",
-  "start_url": "./",
-  "display": "standalone",
-  "background_color": "#0b0d12",
-  "theme_color": "#0b0d12"
-}
+{"name": "Study Timer", "short_name": "Study", "start_url": "./", "display": "standalone", "background_color": "#090b10", "theme_color": "#090b10"}
